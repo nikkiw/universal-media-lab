@@ -1,14 +1,14 @@
-# Локальные переменные окружения
+# Local environment variables
 .env
 
-# Системные файлы macOS
+# macOS system files
 .DS_Store
 
-# Временные файлы Docker и смонтированные тома
+# Docker temporary files and mounted volumes
 *.log
 .docker/
 
-# Папки сред разработки (IDE)
+# IDE folders
 .idea/
 .vscode/
 *.suo
@@ -17,5 +17,17 @@
 *.sln
 *.swp
 
-# Временные файлы тестов
+# Temporary test mappings
 /wiremock/mappings/*-tmp.json
+
+# Local source videos and generated media assets
+/media/inbox/*
+!/media/inbox/.gitkeep
+/media/generated/*
+!/media/generated/.gitkeep
+/media/catalog/
+/media/.work/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

@@ -1,13 +1,17 @@
 #!/usr/bin/env sh
 set -eu
+
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck disable=SC1091
 [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
+
 BASE="http://127.0.0.1:${GATEWAY_PORT:-8080}"
 DYN="http://127.0.0.1:${NETWORK_DYNAMIC_PORT:-18080}"
 
 echo "Health"
 curl -fsS "$BASE/health"
+echo "API catalog"
+curl -fsS -o /dev/null "$BASE/api/v1/feed"
 echo "Image"
 curl -fsS -o /dev/null "$BASE/img/insecure/rs:fill:320:180/q:60/plain/local:///sample.jpg@webp"
 echo "Range request"

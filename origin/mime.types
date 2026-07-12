@@ -1,19 +1,20 @@
 types {
-  text/html                             html htm;
-  text/plain                            txt;
-  application/json                     json;
-  application/octet-stream             bin;
-  application/vnd.apple.mpegurl         m3u8;
-  application/dash+xml                  mpd;
-  image/jpeg                            jpeg jpg;
-  image/png                             png;
-  image/gif                             gif;
-  image/webp                            webp;
-  image/avif                            avif;
-  image/svg+xml                         svg;
-  video/mp4                             mp4 m4s;
-  video/webm                            webm;
-  video/mp2t                            ts;
-  audio/mp4                             m4a;
-  audio/aac                             aac;
+  text/html                              html htm;
+  text/plain                             txt;
+  text/vtt                               vtt;
+  application/json                       json;
+  application/octet-stream               bin;
+  application/vnd.apple.mpegurl          m3u8;
+  application/dash+xml                   mpd;
+  image/jpeg                             jpeg jpg;
+  image/png                              png;
+  image/gif                              gif;
+  image/webp                             webp;
+  image/avif                             avif;
+  image/svg+xml                          svg;
+  video/mp4                              mp4 m4s;
+  video/webm                             webm;
+  video/mp2t                             ts;
+  audio/mp4                              m4a;
+  audio/aac                              aac;
 }

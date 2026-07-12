@@ -1,0 +1,148 @@
+name: ${COMPOSE_PROJECT_NAME:-media-lab}
+
+services:
+  origin:
+    image: nginx:${NGINX_VERSION:-1.28-alpine}
+    restart: unless-stopped
+    volumes:
+      - ./origin/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./origin/mime.types:/etc/nginx/media-lab-mime.types:ro
+      - ./media:/srv/media:ro
+    networks: [media-lab]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:${IMGPROXY_VERSION:-v4.0.11}
+    restart: unless-stopped
+    environment:
+      IMGPROXY_BIND: ":8080"
+      IMGPROXY_PROMETHEUS_BIND: ":8081"
+      IMGPROXY_PROMETHEUS_NAMESPACE: "imgproxy"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /srv/images
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_DEVELOPMENT_ERRORS_MODE: "true"
+      IMGPROXY_LOG_FORMAT: json
+      IMGPROXY_LOG_LEVEL: info
+      IMGPROXY_WORKERS: ${IMGPROXY_WORKERS:-4}
+      IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-100}
+      IMGPROXY_MAX_ANIMATION_FRAMES: ${IMGPROXY_MAX_ANIMATION_FRAMES:-500}
+    volumes:
+      - ./media/images:/srv/images:ro
+    networks: [media-lab]
+
+  wiremock:
+    image: wiremock/wiremock:${WIREMOCK_VERSION:-3.13.2}
+    restart: unless-stopped
+    entrypoint:
+      - /docker-entrypoint.sh
+      - --global-response-templating
+      - --async-response-enabled
+      - --async-response-threads
+      - "32"
+      - --disable-gzip
+      - --enable-stub-cors
+      - --max-request-journal-entries
+      - "2000"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
+      - ./wiremock/__files:/home/wiremock/__files:ro
+    depends_on:
+      origin:
+        condition: service_healthy
+    networks: [media-lab]
+
+  gateway:
+    image: nginx:${NGINX_VERSION:-1.28-alpine}
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/html:/usr/share/nginx/html:ro
+    depends_on:
+      - origin
+      - imgproxy
+      - wiremock
+    networks: [media-lab]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:${TOXIPROXY_VERSION:-2.12.0}
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+    ports:
+      - "${TOXIPROXY_API_PORT:-8474}:8474"
+      - "${NETWORK_DYNAMIC_PORT:-18080}:18080"
+      - "${NETWORK_CLEAN_PORT:-18081}:18081"
+      - "${NETWORK_WIFI_PORT:-18082}:18082"
+      - "${NETWORK_LTE_PORT:-18083}:18083"
+      - "${NETWORK_SLOW_LTE_PORT:-18084}:18084"
+      - "${NETWORK_3G_PORT:-18085}:18085"
+      - "${NETWORK_EDGE_PORT:-18086}:18086"
+      - "${NETWORK_FLAKY_PORT:-18087}:18087"
+      - "${NETWORK_OFFLINE_PORT:-18088}:18088"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [media-lab]
+
+  toxiproxy-bootstrap:
+    image: curlimages/curl:${CURL_VERSION:-8.12.1}
+    restart: "no"
+    entrypoint: ["/bin/sh", "/bootstrap/bootstrap.sh"]
+    volumes:
+      - ./toxiproxy:/bootstrap:ro
+    depends_on:
+      - toxiproxy
+    networks: [media-lab]
+
+  prometheus:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v3.13.1}
+    profiles: [observability]
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    networks: [media-lab]
+
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-13.1.0}
+    profiles: [observability]
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks: [media-lab]
+
+networks:
+  media-lab:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

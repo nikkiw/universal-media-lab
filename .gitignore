@@ -1,0 +1,21 @@
+# Локальные переменные окружения
+.env
+
+# Системные файлы macOS
+.DS_Store
+
+# Временные файлы Docker и смонтированные тома
+*.log
+.docker/
+
+# Папки сред разработки (IDE)
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Временные файлы тестов
+/wiremock/mappings/*-tmp.json

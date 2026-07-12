@@ -1,0 +1,9 @@
+{
+  "priority": 5,
+  "request": { "method": "GET", "urlPathPattern": "/body/5000/media/.*" },
+  "response": {
+    "proxyBaseUrl": "http://origin:8080",
+    "chunkedDribbleDelay": { "numberOfChunks": 20, "totalDuration": 5000 },
+    "headers": { "X-Media-Lab-Body-Duration": "5000" }
+  }
+}

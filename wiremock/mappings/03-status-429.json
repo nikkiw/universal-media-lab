@@ -1,0 +1,5 @@
+{
+  "priority": 1,
+  "request": { "method": "ANY", "urlPath": "/status/429" },
+  "response": { "status": 429, "headers": { "Content-Type": "application/json", "Retry-After": "2" }, "jsonBody": { "error": "Synthetic 429" } }
+}

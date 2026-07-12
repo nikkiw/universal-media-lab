@@ -1,0 +1,5 @@
+{
+  "priority": 5,
+  "request": { "method": "GET", "urlPathPattern": "/ttfb/1000/media/.*" },
+  "response": { "proxyBaseUrl": "http://origin:8080", "fixedDelayMilliseconds": 1000, "headers": { "X-Media-Lab-TTFB": "1000" } }
+}

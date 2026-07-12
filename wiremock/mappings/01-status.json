@@ -1,0 +1,10 @@
+{
+  "priority": 2,
+  "request": { "method": "ANY", "urlPathPattern": "/status/(404|429|500|503)" },
+  "response": {
+    "status": 503,
+    "headers": { "Content-Type": "application/json", "Retry-After": "2", "X-Media-Lab": "wiremock-status" },
+    "jsonBody": { "error": "Synthetic HTTP failure", "requestedPath": "{{request.path}}" },
+    "transformers": ["response-template"]
+  }
+}

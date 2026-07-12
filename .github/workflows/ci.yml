@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env template
+        run: cp .env.example .env
+
+      - name: Validate Docker Compose Configuration
+        run: docker compose config -q
+
+      - name: ShellCheck linting
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './scripts'

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Media Lab</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;line-height:1.45}
+    code{background:#eee;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}
+    table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:left}
+    img{max-width:320px;height:auto} .muted{opacity:.72}
+  </style>
+</head>
+<body>
+<h1>Media Lab</h1>
+<p class="muted">Reusable image/video/network test stand for Android and Kotlin Multiplatform clients.</p>
+<h2>Image transformations</h2>
+<p><a href="/img/insecure/rs:fill:320:180/q:60/plain/local:///sample.jpg@webp">320×180 WebP q60</a></p>
+<p><a href="/img/insecure/rs:fit:720:1280/q:45/plain/local:///sample.jpg@avif">AVIF q45</a></p>
+<img src="/img/insecure/rs:fill:320:180/q:60/plain/local:///sample.jpg@webp" alt="sample">
+<h2>Raw media</h2>
+<p><a href="/media/images/sample.jpg">JPEG</a> · <a href="/media/video/sample-portrait.mp4">progressive MP4</a> · <a href="/media/video/hls/master.m3u8">HLS</a></p>
+<h2>Server behavior</h2>
+<table>
+<tr><th>Case</th><th>Path</th></tr>
+<tr><td>TTFB 200 ms</td><td><code>/mock/ttfb/200/media/images/sample.jpg</code></td></tr>
+<tr><td>TTFB 1000 ms</td><td><code>/mock/ttfb/1000/media/video/sample-portrait.mp4</code></td></tr>
+<tr><td>Body over 5 s</td><td><code>/mock/body/5000/media/images/sample.jpg</code></td></tr>
+<tr><td>Long-tail delay</td><td><code>/mock/random/media/images/sample.jpg</code></td></tr>
+<tr><td>HTTP 503</td><td><code>/mock/status/503</code></td></tr>
+<tr><td>Connection reset</td><td><code>/mock/fault/reset</code></td></tr>
+<tr><td>No HTTP Range</td><td><code>/no-range/media/video/sample-portrait.mp4</code></td></tr>
+</table>
+</body>
+</html>

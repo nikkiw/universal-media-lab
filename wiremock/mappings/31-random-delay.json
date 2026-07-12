@@ -1,0 +1,9 @@
+{
+  "priority": 5,
+  "request": { "method": "GET", "urlPathPattern": "/random/media/.*" },
+  "response": {
+    "proxyBaseUrl": "http://origin:8080",
+    "delayDistribution": { "type": "lognormal", "median": 150, "sigma": 0.8, "maxValue": 3000 },
+    "headers": { "X-Media-Lab-Delay": "lognormal" }
+  }
+}

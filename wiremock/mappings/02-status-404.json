@@ -1,0 +1,5 @@
+{
+  "priority": 1,
+  "request": { "method": "ANY", "urlPath": "/status/404" },
+  "response": { "status": 404, "headers": { "Content-Type": "application/json" }, "jsonBody": { "error": "Synthetic 404" } }
+}

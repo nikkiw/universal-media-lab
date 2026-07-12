@@ -1,0 +1,5 @@
+{
+  "priority": 1,
+  "request": { "method": "GET", "urlPath": "/redirect/2" },
+  "response": { "status": 302, "headers": { "Location": "/mock/media/images/sample.jpg" } }
+}

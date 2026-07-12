@@ -1,0 +1,5 @@
+{
+  "priority": 1,
+  "request": { "method": "ANY", "urlPath": "/fault/random-close" },
+  "response": { "fault": "RANDOM_DATA_THEN_CLOSE" }
+}

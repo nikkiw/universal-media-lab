@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 set -eu
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck disable=SC1091
 [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
 API="http://127.0.0.1:${TOXIPROXY_API_PORT:-8474}"
 PROXY=dynamic

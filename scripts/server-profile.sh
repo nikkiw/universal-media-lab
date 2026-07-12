@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 set -eu
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck disable=SC1091
 [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
 API="http://127.0.0.1:${GATEWAY_PORT:-8080}/__wiremock/settings"
 PROFILE=${1:-}

@@ -213,6 +213,159 @@ Restart WireMock after adding a mapping:
 docker compose restart wiremock
 ```
 
+See [docs/custom-paths.md](file:///Users/dev/Developer/@PortfolioProjects/media-lab/docs/custom-paths.md) for a comprehensive guide on overriding default directories, customizing volume mappings, and routing custom URL paths.
+
 ## Version policy
 
 Images are pinned in `.env.example`. Upgrade deliberately and run the smoke test; do not use floating `latest` tags in CI.
+
+## Production-like video ingest
+
+The lab can turn source videos into a static production-like media backend. Put source files into [media/inbox/](file:///Users/dev/Developer/@PortfolioProjects/media-lab/media/inbox), then run:
+
+```bash
+make ingest
+make up
+```
+
+The ingest tool runs only on demand through the Compose `tools` profile. Runtime services remain Nginx, imgproxy, WireMock, and Toxiproxy.
+
+For each source video, the pipeline creates:
+
+- H.264/AAC progressive MP4 with `faststart` metadata placement;
+- adaptive HLS VOD with an fMP4 master playlist;
+- adaptive MPEG-DASH VOD with separate video and audio adaptation sets;
+- a JPEG poster, with WebP/AVIF/blurred derivatives served on-the-fly by imgproxy;
+- periodic seek-preview images and a WebVTT thumbnail track;
+- copied sidecar WebVTT subtitles named `<video>.<language>.vtt`;
+- probe metadata and a static JSON API catalog.
+
+Generated assets are written under `media/generated/<asset-id>/` and are ignored by Git. The source inbox is ignored as well, so large local media files cannot be committed accidentally.
+
+---
+
+## Step-by-Step Guide: Ingesting Your First Video
+
+Follow these steps to ingest and play back a new video asset starting from a fresh environment:
+
+### 1. Bootstrap the Environment
+First, ensure you have a clean setup and initialize the lab. The bootstrap command runs the default ingest, starts background services, and runs media verification checks:
+```bash
+# Clean up any active containers and volumes
+make reset
+
+# Copy environment variables configuration
+cp .env.example .env
+
+# Perform initial ingest, start containers, and run checks
+make bootstrap
+```
+
+### 2. Add Your Media & Subtitles
+Place your source video file (e.g., `.mp4`, `.mov`, `.webm`) into [media/inbox/](file:///Users/dev/Developer/@PortfolioProjects/media-lab/media/inbox). You can also add sidecar subtitles using the format `<video-name>.<language-code>.vtt`:
+```bash
+# 1. Copy video file to inbox
+cp ~/Downloads/my-presentation.mp4 media/inbox/
+
+# 2. Add English and Spanish subtitles (optional)
+cp ~/Downloads/my-presentation.en.vtt media/inbox/
+cp ~/Downloads/my-presentation.es.vtt media/inbox/
+```
+
+### 3. Run Ingest and Generate Catalog
+Execute the media ingestion tool to transcode the video and generate thumbnails/manifests:
+```bash
+make ingest
+```
+This script slugifies your filename to create a unique asset ID (e.g., `my-presentation.mp4` becomes `my-presentation`), builds HLS/DASH/MP4 renditions, and regenerates the static JSON feed catalog.
+
+### 4. Verify & Play
+Verify that manifests are generated properly and the gateway endpoints are serving them:
+```bash
+make verify-media
+```
+Once verified, the catalog feed can be accessed at:
+- **Feed URL**: `http://localhost:8080/api/v1/feed`
+- **Asset Details**: `http://localhost:8080/api/v1/media/my-presentation`
+
+---
+
+## Typical Tasks & Recipes
+
+### How to Force Rebuild/Regenerate an Asset
+If you modified a source video or changed transcoding configs, you can force regeneration of a specific asset:
+```bash
+# Rebuild a single asset
+make rebuild ID=my-presentation
+
+# Rebuild all assets
+make rebuild
+```
+
+### How to Customize the Transcoding Resolution and Bitrate
+Target resolutions are read from [config/encoding-ladder.tsv](file:///Users/dev/Developer/@PortfolioProjects/media-lab/config/encoding-ladder.tsv). You can modify target height, bitrate, and buffer sizing by editing this tab-separated file.
+> [!NOTE]
+> To prevent upscaling, the ingest pipeline automatically skips any target resolution higher than the source video's original resolution.
+
+### How to Emulate Network Conditions for Video Streaming
+Test adaptive bitrate switching (ABR) by dynamically changing the Toxiproxy network profile on the proxy port (`18080`):
+```bash
+make network-lte    # Limit to LTE speed & latency
+make network-3g     # Limit to 3G speed & latency
+make network-flaky  # Introduce latency and 5% packet loss
+make network-clean  # Reset all limits (perfect connection)
+```
+
+### How to View Runtime Logs
+To troubleshoot routing, caching, or transcoding issues, view container output:
+```bash
+make logs
+```
+
+### How to Verify Media with `ffprobe` and Python
+To run the automated verification script that tests HTTP headers, Range support (206 Partial Content), imgproxy WebP generation, HLS variant lists, and DASH XML integrity:
+```bash
+make verify-media
+```
+
+---
+
+## Ingest Commands Reference
+
+| Command | Description |
+|---|---|
+| `make ingest` | Scans `media/inbox/` for new/modified videos and generates their manifests, posters, subtitles, and rebuilds the catalog. |
+| `make ingest-one ID=<id>` | Processes only the single video matching the specified ID or filename. |
+| `make rebuild [ID=<id>]` | Force-regenerates transcoding files and JSON catalog for the specified ID (or all if omitted). |
+| `make catalog` | Rebuilds the static feed `/api/v1/feed` and subtitles metadata without re-encoding video tracks. |
+| `make verify-media` | Validates generated assets, manifest formats, poster resizing, and API status codes locally. |
+| `make bootstrap` | Sequentially runs `ingest`, starts the Compose environment (`up`), executes integration checks, and runs `verify-media`. |
+
+---
+
+## Media API & Mock Catalog
+
+The generated API is served by the Nginx gateway at:
+- `GET /api/v1/feed`
+- `GET /api/v1/media/<asset-id>`
+
+### Root-Relative URLs for Clients
+All playbacks, posters, and subtitles are served via root-relative paths. Android/KMP clients can switch between production servers and the local lab by setting the base URL prefix:
+- **Android Emulator**: `http://10.0.2.2:18080`
+- **USB Device (with `adb reverse tcp:18080 tcp:18080`)**: `http://127.0.0.1:18080`
+- **iOS Simulator / Desktop**: `http://127.0.0.1:18080`
+
+### Test & Fault URLs
+Every feed item exposes custom mocked test endpoints under `testUrls`:
+- `cacheableProgressive`: `/cache/media/generated/<id>/progressive/video.mp4`
+- `noRangeProgressive`: `/no-range/media/generated/<id>/progressive/video.mp4`
+- `wrongContentTypeProgressive`: `/wrong-content-type/media/generated/<id>/progressive/video.mp4`
+- `ttfb1000Progressive`: `/mock/ttfb/1000/media/generated/<id>/progressive/video.mp4`
+- `http503`: `/mock/status/503`
+- `connectionReset`: `/mock/fault/reset`
+
+---
+
+## Out of Scope / Futures
+This pipeline is designed for H.264/AAC offline streaming compatibility. Live streaming (HLS/DASH), DRM license server simulators, HEVC/VP9 ladders, and production backend authorization systems are out of scope. For complex custom responses, you can configure [wiremock/mappings/](file:///Users/dev/Developer/@PortfolioProjects/media-lab/wiremock/mappings).
+

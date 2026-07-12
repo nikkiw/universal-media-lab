@@ -31,7 +31,8 @@ services:
       IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-100}
       IMGPROXY_MAX_ANIMATION_FRAMES: ${IMGPROXY_MAX_ANIMATION_FRAMES:-500}
     volumes:
-      - ./media/images:/srv/images:ro
+      - ./media/images:/srv/images
+      - ./media/generated:/srv/images/generated:ro
     networks: [media-lab]
 
   wiremock:
@@ -104,6 +105,41 @@ services:
     depends_on:
       - toxiproxy
     networks: [media-lab]
+
+  media-ingest:
+    image: jrottenberg/ffmpeg:${FFMPEG_VERSION:-8.1-alpine320}
+    profiles: [tools]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    network_mode: none
+    entrypoint: ["/bin/sh", "/scripts/media-ingest.sh"]
+    environment:
+      MEDIA_INPUT_ROOT: /media/inbox
+      MEDIA_OUTPUT_ROOT: /media/generated
+      MEDIA_LADDER_FILE: /config/encoding-ladder.tsv
+      MEDIA_ONLY: "${MEDIA_ONLY:-}"
+      MEDIA_FORCE: "${MEDIA_FORCE:-0}"
+      MEDIA_SEGMENT_SECONDS: "${MEDIA_SEGMENT_SECONDS:-2}"
+      MEDIA_FRAME_RATE: "${MEDIA_FRAME_RATE:-30}"
+      MEDIA_POSTER_SECOND: "${MEDIA_POSTER_SECOND:-1}"
+      MEDIA_STORYBOARD_INTERVAL: "${MEDIA_STORYBOARD_INTERVAL:-5}"
+      MEDIA_FFMPEG_PRESET: "${MEDIA_FFMPEG_PRESET:-veryfast}"
+    volumes:
+      - ./scripts/media-ingest.sh:/scripts/media-ingest.sh:ro
+      - ./config/encoding-ladder.tsv:/config/encoding-ladder.tsv:ro
+      - ./media:/media
+
+  media-catalog:
+    image: python:${PYTHON_VERSION:-3.13.14-alpine3.24}
+    profiles: [tools]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    network_mode: none
+    entrypoint: ["python", "/scripts/build-catalog.py"]
+    environment:
+      MEDIA_ROOT: /media
+      MEDIA_STORYBOARD_INTERVAL: "${MEDIA_STORYBOARD_INTERVAL:-5}"
+    volumes:
+      - ./scripts/build-catalog.py:/scripts/build-catalog.py:ro
+      - ./media:/media
 
   prometheus:
     image: prom/prometheus:${PROMETHEUS_VERSION:-v3.13.1}

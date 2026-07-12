@@ -18,6 +18,12 @@ jobs:
       - name: Validate Docker Compose Configuration
         run: docker compose config -q
 
+      - name: Validate shell syntax
+        run: sh -n scripts/*.sh
+
+      - name: Validate Python scripts
+        run: python3 -m py_compile scripts/build-catalog.py
+
       - name: ShellCheck linting
         uses: ludeeus/action-shellcheck@master
         with:

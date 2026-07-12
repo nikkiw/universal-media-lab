@@ -303,6 +303,7 @@ process_file() {
   if [ -n "$audio_path" ]; then
     adaptation_sets="$adaptation_sets id=1,streams=a"
   fi
+  # shellcheck disable=SC2016
   set -- "$@" -c copy -f dash \
     -seg_duration "$SEGMENT_SECONDS" \
     -use_template 1 -use_timeline 1 \

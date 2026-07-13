@@ -183,3 +183,22 @@ Restart WireMock after adding or changing mappings:
 ```bash
 docker compose restart wiremock
 ```
+
+## Configurable Image Placeholders
+
+During the ingestion process, the catalog builder generates image placeholder values inside the feed. This can be configured in `.env` using the `PLACEHOLDER_ALGORITHM` variable:
+
+```dotenv
+PLACEHOLDER_ALGORITHM=blurhash
+```
+
+The supported algorithms are:
+
+- `blurhash` (default): Encodes a standard BlurHash string.
+- `thumbhash`: Encodes a ThumbHash base64 string, representing the image with transparency and aspect ratio details.
+- `lqip`: Low-Quality Image Placeholder. Generates a base64-encoded `16x16` WebP data URL suitable for zero-dependency native loading in Web and Coil KMP.
+- `average_color`: Calculates the average sRGB color of the poster and outputs a HEX string.
+- `none`: Disables the placeholder generation completely.
+
+The computed values are populated into the `"placeholder"` object in `feed.json` and individual legacy keys (e.g., `"blurhash"`, `"thumbhash"`, `"lqip"`, `"averageColor"`) are also appended for compatibility.
+

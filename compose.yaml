@@ -139,6 +139,7 @@ services:
       MEDIA_ROOT: /media
       MEDIA_STORYBOARD_INTERVAL: "${MEDIA_STORYBOARD_INTERVAL:-5}"
       MEDIA_URL_PREFIX: "${MEDIA_URL_PREFIX:-/media/generated}"
+      PLACEHOLDER_ALGORITHM: "${PLACEHOLDER_ALGORITHM:-blurhash}"
     volumes:
       - ./scripts/build-catalog.py:/scripts/build-catalog.py:ro
       - ./media:/media

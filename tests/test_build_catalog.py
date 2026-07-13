@@ -58,11 +58,16 @@ class BuildCatalogTest(unittest.TestCase):
             "storyboard/frame-00001.jpg": "frame",
             "subtitles/en.vtt": "WEBVTT\n",
             ".source-name": "Demo Source.mov\n",
+            ".poster.rgb24": bytes([255, 0, 0] * 1024),
+            ".poster.lqip": "UklGRq4AAABXRUJQVlA4...",
         }
         for relative_path, contents in files.items():
             path = asset_dir / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(contents, encoding="utf-8")
+            if isinstance(contents, bytes):
+                path.write_bytes(contents)
+            else:
+                path.write_text(contents, encoding="utf-8")
         return asset_dir
 
     def test_normalizes_media_url_prefix(self) -> None:
@@ -178,6 +183,58 @@ class BuildCatalogTest(unittest.TestCase):
             expected_hls_url = "/nested/videos/demo/hls/master.m3u8"
             self.assertEqual(feed["items"][0]["hlsUrl"], expected_hls_url)
             self.assertEqual(asset["hlsUrl"], expected_hls_url)
+
+    def test_placeholder_blurhash(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            mock.patch.object(build_catalog, "PLACEHOLDER_ALGORITHM", "blurhash")
+        ):
+            asset_dir = self.create_asset(Path(temporary_directory))
+            asset = build_catalog.build_asset(asset_dir, "/media/generated")
+            self.assertIsNotNone(asset)
+            assert asset is not None
+            self.assertEqual(asset["placeholder"]["type"], "blurhash")
+            self.assertEqual(asset["placeholder"]["value"], "U9TI:j|cfQ|c|co1fQo1fQfQfQfQ|co1fQo1")
+            self.assertEqual(asset["blurhash"], "U9TI:j|cfQ|c|co1fQo1fQfQfQfQ|co1fQo1")
+
+    def test_placeholder_thumbhash(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            mock.patch.object(build_catalog, "PLACEHOLDER_ALGORITHM", "thumbhash")
+        ):
+            asset_dir = self.create_asset(Path(temporary_directory))
+            asset = build_catalog.build_asset(asset_dir, "/media/generated")
+            self.assertIsNotNone(asset)
+            assert asset is not None
+            self.assertEqual(asset["placeholder"]["type"], "thumbhash")
+            self.assertTrue(len(asset["placeholder"]["value"]) > 0)
+            self.assertEqual(asset["thumbhash"], asset["placeholder"]["value"])
+
+    def test_placeholder_lqip(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            mock.patch.object(build_catalog, "PLACEHOLDER_ALGORITHM", "lqip")
+        ):
+            asset_dir = self.create_asset(Path(temporary_directory))
+            asset = build_catalog.build_asset(asset_dir, "/media/generated")
+            self.assertIsNotNone(asset)
+            assert asset is not None
+            self.assertEqual(asset["placeholder"]["type"], "lqip")
+            self.assertEqual(asset["placeholder"]["value"], "data:image/webp;base64,UklGRq4AAABXRUJQVlA4...")
+            self.assertEqual(asset["lqip"], "data:image/webp;base64,UklGRq4AAABXRUJQVlA4...")
+
+    def test_placeholder_average_color(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            mock.patch.object(build_catalog, "PLACEHOLDER_ALGORITHM", "average_color")
+        ):
+            asset_dir = self.create_asset(Path(temporary_directory))
+            asset = build_catalog.build_asset(asset_dir, "/media/generated")
+            self.assertIsNotNone(asset)
+            assert asset is not None
+            self.assertEqual(asset["placeholder"]["type"], "average_color")
+            self.assertEqual(asset["placeholder"]["value"], "#ff0000")
+            self.assertEqual(asset["averageColor"], "#ff0000")
 
 
 if __name__ == "__main__":

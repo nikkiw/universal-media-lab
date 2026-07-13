@@ -334,6 +334,17 @@ process_file() {
       -q:v 2 -update 1 "$work_dir/poster.jpg"
   fi
 
+  # Scale down to 32x32 raw RGB24 pixels for blurhash/thumbhash/average color
+  ffmpeg -hide_banner -loglevel warning -nostdin -y \
+    -i "$work_dir/poster.jpg" -vf "scale=32:32" -f rawvideo -pix_fmt rgb24 "$work_dir/.poster.rgb24"
+
+  # Generate 16x16 WebP image, base64-encode it, and save it as LQIP placeholder
+  ffmpeg -hide_banner -loglevel warning -nostdin -y \
+    -i "$work_dir/poster.jpg" -vf "scale=16:16" -q:v 40 -f webp -c:v libwebp - | \
+    base64 | tr -d '\r\n' > "$work_dir/.poster.lqip"
+
+
+
   ffmpeg -hide_banner -loglevel warning -nostdin -y -i "$input" \
     -map 0:v:0 -vf "${crop_filter}fps=1/${STORYBOARD_INTERVAL},scale=320:-2:flags=lanczos" \
     -q:v 4 "$work_dir/storyboard/frame-%05d.jpg"

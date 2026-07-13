@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import math
 import os
 import sys
 import tempfile
@@ -11,11 +13,226 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+# Load .env file manually since build-catalog may run on the host or inside Alpine without dotenv library
+def load_env() -> None:
+    env_path = Path(__file__).parents[1] / ".env"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                val = value.strip().strip("'\"")
+                os.environ.setdefault(key.strip(), val)
+
+load_env()
+PLACEHOLDER_ALGORITHM = os.environ.get("PLACEHOLDER_ALGORITHM", "blurhash").lower()
+
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media"))
 GENERATED_ROOT = MEDIA_ROOT / "generated"
 CATALOG_ROOT = MEDIA_ROOT / "catalog" / "v1"
 STORYBOARD_INTERVAL = max(1, int(os.environ.get("MEDIA_STORYBOARD_INTERVAL", "5")))
 DEFAULT_MEDIA_URL_PREFIX = "/media/generated"
+
+BLURHASH_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~"
+
+def base83_encode(value: int, length: int) -> str:
+    if int(value) // (83 ** length) != 0:
+        raise ValueError("Specified length is too short to encode given value.")
+    result = ""
+    for i in range(1, length + 1):
+        digit = int(value) // (83 ** (length - i)) % 83
+        result += BLURHASH_ALPHABET[int(digit)]
+    return result
+
+def srgb_to_linear(value: float) -> float:
+    value = float(value) / 255.0
+    if value <= 0.04045:
+        return value / 12.92
+    return math.pow((value + 0.055) / 1.055, 2.4)
+
+def sign_pow(value: float, exp: float) -> float:
+    return math.copysign(math.pow(abs(value), exp), value)
+
+def linear_to_srgb(value: float) -> int:
+    value = max(0.0, min(1.0, value))
+    if value <= 0.0031308:
+        return int(value * 12.92 * 255 + 0.5)
+    return int((1.055 * math.pow(value, 1 / 2.4) - 0.055) * 255 + 0.5)
+
+def blurhash_encode(image: list[list[list[int]]], components_x: int = 4, components_y: int = 4) -> str:
+    height = float(len(image))
+    width = float(len(image[0]))
+    
+    image_linear = []
+    for y in range(int(height)):
+        image_linear_line = []
+        for x in range(int(width)):
+            image_linear_line.append([
+                srgb_to_linear(image[y][x][0]),
+                srgb_to_linear(image[y][x][1]),
+                srgb_to_linear(image[y][x][2])
+            ])
+        image_linear.append(image_linear_line)
+        
+    components = []
+    max_ac_component = 0.0
+    for j in range(components_y):
+        for i in range(components_x):
+            norm_factor = 1.0 if (i == 0 and j == 0) else 2.0
+            component = [0.0, 0.0, 0.0]
+            for y in range(int(height)):
+                for x in range(int(width)):
+                    basis = norm_factor * math.cos(math.pi * float(i) * float(x) / width) * \
+                                          math.cos(math.pi * float(j) * float(y) / height)
+                    component[0] += basis * image_linear[y][x][0]
+                    component[1] += basis * image_linear[y][x][1]
+                    component[2] += basis * image_linear[y][x][2]
+                    
+            component[0] /= (width * height)
+            component[1] /= (width * height)
+            component[2] /= (width * height)
+            components.append(component)
+            
+            if not (i == 0 and j == 0):
+                max_ac_component = max(max_ac_component, abs(component[0]), abs(component[1]), abs(component[2]))
+                
+    dc_value = (linear_to_srgb(components[0][0]) << 16) + \
+               (linear_to_srgb(components[0][1]) << 8) + \
+               linear_to_srgb(components[0][2])
+    
+    quant_max_ac_component = int(max(0, min(82, math.floor(max_ac_component * 166 - 0.5))))
+    ac_component_norm_factor = float(quant_max_ac_component + 1) / 166.0
+    
+    ac_values = []
+    for r, g, b in components[1:]:
+        ac_values.append(
+            int(max(0.0, min(18.0, math.floor(sign_pow(r / ac_component_norm_factor, 0.5) * 9.0 + 9.5)))) * 19 * 19 + \
+            int(max(0.0, min(18.0, math.floor(sign_pow(g / ac_component_norm_factor, 0.5) * 9.0 + 9.5)))) * 19 + \
+            int(max(0.0, min(18.0, math.floor(sign_pow(b / ac_component_norm_factor, 0.5) * 9.0 + 9.5))))
+        )
+        
+    blurhash = ""
+    blurhash += base83_encode((components_x - 1) + (components_y - 1) * 9, 1)
+    blurhash += base83_encode(quant_max_ac_component, 1)
+    blurhash += base83_encode(dc_value, 4)
+    for ac_value in ac_values:
+        blurhash += base83_encode(ac_value, 2)
+    return blurhash
+
+def thumbhash_encode(width: int, height: int, rgba: list[int]) -> str:
+    avg_r, avg_g, avg_b, avg_a = 0.0, 0.0, 0.0, 0.0
+    for i in range(width * height):
+        j = i * 4
+        alpha = rgba[j + 3] / 255.0
+        avg_r += alpha / 255.0 * rgba[j]
+        avg_g += alpha / 255.0 * rgba[j + 1]
+        avg_b += alpha / 255.0 * rgba[j + 2]
+        avg_a += alpha
+
+    if avg_a > 0:
+        avg_r /= avg_a
+        avg_g /= avg_a
+        avg_b /= avg_a
+
+    has_alpha = avg_a < (width * height)
+    l_limit = 5 if has_alpha else 7
+    lx = max(1, round(l_limit * width / max(width, height)))
+    ly = max(1, round(l_limit * height / max(width, height)))
+    
+    l, p, q, a_channel = [], [], [], []
+    for i in range(width * height):
+        j = i * 4
+        alpha = rgba[j + 3] / 255.0
+        r = avg_r * (1.0 - alpha) + alpha / 255.0 * rgba[j]
+        g = avg_g * (1.0 - alpha) + alpha / 255.0 * rgba[j + 1]
+        b = avg_b * (1.0 - alpha) + alpha / 255.0 * rgba[j + 2]
+        l.append((r + g + b) / 3.0)
+        p.append((r + g) / 2.0 - b)
+        q.append(r - g)
+        a_channel.append(alpha)
+
+    def encode_channel(channel: list[float], nx: int, ny: int):
+        dc = 0.0
+        ac = []
+        scale = 0.0
+        fx = [0.0] * width
+
+        for cy in range(ny):
+            for cx in range(nx):
+                if cx * ny >= nx * (ny - cy):
+                    continue
+                f = 0.0
+                for x in range(width):
+                    fx[x] = math.cos(math.pi / width * cx * (x + 0.5))
+                for y in range(height):
+                    fy = math.cos(math.pi / height * cy * (y + 0.5))
+                    for x in range(width):
+                        f += channel[x + y * width] * fx[x] * fy
+                f /= (width * height)
+                if cx > 0 or cy > 0:
+                    ac.append(f)
+                    scale = max(scale, abs(f))
+                else:
+                    dc = f
+        if scale > 0:
+            for i in range(len(ac)):
+                ac[i] = 0.5 + 0.5 / scale * ac[i]
+        return dc, ac, scale
+
+    l_dc, l_ac, l_scale = encode_channel(l, max(3, lx), max(3, ly))
+    p_dc, p_ac, p_scale = encode_channel(p, 3, 3)
+    q_dc, q_ac, q_scale = encode_channel(q, 3, 3)
+    
+    if has_alpha:
+        a_dc, a_ac, a_scale = encode_channel(a_channel, 5, 5)
+    else:
+        a_dc, a_ac, a_scale = 1.0, [], 1.0
+
+    is_landscape = width > height
+    header24 = round(63 * l_dc) | (round(31.5 + 31.5 * p_dc) << 6) | (round(31.5 + 31.5 * q_dc) << 12) | (round(31 * l_scale) << 18) | (has_alpha << 23)
+    header16 = (ly if is_landscape else lx) | (round(63 * p_scale) << 3) | (round(63 * q_scale) << 9) | (is_landscape << 15)
+    
+    thumb_hash_bytes = [header24 & 255, (header24 >> 8) & 255, header24 >> 16, header16 & 255, header16 >> 8]
+    if has_alpha:
+        thumb_hash_bytes.append(round(15 * a_dc) | (round(15 * a_scale) << 4))
+
+    is_odd = False
+    for ac in [l_ac, p_ac, q_ac]:
+        for f in ac:
+            u = int(round(15.0 * f))
+            if is_odd:
+                thumb_hash_bytes[-1] |= u << 4
+            else:
+                thumb_hash_bytes.append(u)
+            is_odd = not is_odd
+
+    if has_alpha:
+        for f in a_ac:
+            u = int(round(15.0 * f))
+            if is_odd:
+                thumb_hash_bytes[-1] |= u << 4
+            else:
+                thumb_hash_bytes.append(u)
+            is_odd = not is_odd
+
+    return base64.b64encode(bytes(thumb_hash_bytes)).decode('ascii')
+
+def calculate_average_color(image: list[list[list[int]]]) -> str:
+    total_r, total_g, total_b = 0, 0, 0
+    count = 0
+    for row in image:
+        for r, g, b in row:
+            total_r += r
+            total_g += g
+            total_b += b
+            count += 1
+    avg_r = round(total_r / count)
+    avg_g = round(total_g / count)
+    avg_b = round(total_b / count)
+    return f"#{avg_r:02x}{avg_g:02x}{avg_b:02x}"
+
 
 
 def warn(message: str) -> None:
@@ -288,6 +505,43 @@ def build_asset(asset_dir: Path, media_url_prefix: str) -> dict[str, Any] | None
         else source_audio is not None
     )
 
+    placeholder_val = None
+    rgb_path = asset_dir / ".poster.rgb24"
+    lqip_path = asset_dir / ".poster.lqip"
+
+    if PLACEHOLDER_ALGORITHM == "lqip":
+        if lqip_path.is_file():
+            try:
+                raw_b64 = lqip_path.read_text(encoding="utf-8").strip()
+                placeholder_val = f"data:image/webp;base64,{raw_b64}"
+            except Exception as e:
+                warn(f"failed to read lqip for {asset_id}: {e}")
+    elif PLACEHOLDER_ALGORITHM != "none":
+        if rgb_path.is_file():
+            try:
+                data = rgb_path.read_bytes()
+                if len(data) == 3072:
+                    image = []
+                    for y in range(32):
+                        row = []
+                        for x in range(32):
+                            idx = (y * 32 + x) * 3
+                            row.append([data[idx], data[idx+1], data[idx+2]])
+                        image.append(row)
+
+                    if PLACEHOLDER_ALGORITHM == "blurhash":
+                        placeholder_val = blurhash_encode(image, 4, 4)
+                    elif PLACEHOLDER_ALGORITHM == "thumbhash":
+                        rgba = []
+                        for row in image:
+                            for r, g, b in row:
+                                rgba.extend([r, g, b, 255])
+                        placeholder_val = thumbhash_encode(32, 32, rgba)
+                    elif PLACEHOLDER_ALGORITHM == "average_color":
+                        placeholder_val = calculate_average_color(image)
+            except Exception as e:
+                warn(f"failed to compute {PLACEHOLDER_ALGORITHM} for {asset_id}: {e}")
+
     asset: dict[str, Any] = {
         "id": asset_id,
         "apiUrl": f"/api/v1/media/{asset_id}",
@@ -310,6 +564,7 @@ def build_asset(asset_dir: Path, media_url_prefix: str) -> dict[str, Any] | None
         "thumbnailUrl": f"/img/insecure/rs:fill:360:640/q:70/plain/{imgproxy_root}@webp",
         "blurredPosterUrl": f"/img/insecure/rs:fill:36:64/q:20/bl:8/plain/{imgproxy_root}@webp",
         "avifPosterUrl": f"/img/insecure/rs:fit:720:1280/q:55/plain/{imgproxy_root}@avif",
+
         "progressiveUrl": join_url(media_root, "progressive", "video.mp4"),
         "hlsUrl": join_url(media_root, "hls", "master.m3u8"),
         "dashUrl": join_url(media_root, "dash", "manifest.mpd"),
@@ -343,6 +598,21 @@ def build_asset(asset_dir: Path, media_url_prefix: str) -> dict[str, Any] | None
     }
     if storyboard is not None:
         asset["storyboard"] = storyboard
+
+    if placeholder_val is not None:
+        asset["placeholder"] = {
+            "type": PLACEHOLDER_ALGORITHM,
+            "value": placeholder_val
+        }
+        if PLACEHOLDER_ALGORITHM == "blurhash":
+            asset["blurhash"] = placeholder_val
+        elif PLACEHOLDER_ALGORITHM == "thumbhash":
+            asset["thumbhash"] = placeholder_val
+        elif PLACEHOLDER_ALGORITHM == "average_color":
+            asset["averageColor"] = placeholder_val
+        elif PLACEHOLDER_ALGORITHM == "lqip":
+            asset["lqip"] = placeholder_val
+
     return asset
 
 

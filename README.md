@@ -259,12 +259,17 @@ For each source video, the pipeline creates:
 - H.264/AAC progressive MP4 with `faststart` metadata placement;
 - adaptive HLS VOD with an fMP4 master playlist;
 - adaptive MPEG-DASH VOD with separate video and audio adaptation sets;
-- a JPEG poster, with WebP/AVIF/blurred derivatives served on-the-fly by imgproxy;
+- a JPEG poster, with WebP/AVIF/blurred derivatives served on-the-fly by imgproxy, and a configurable image placeholder;
 - periodic seek-preview images and a WebVTT thumbnail track;
 - copied sidecar WebVTT subtitles named `<video>.<language>.vtt`;
 - probe metadata and a static JSON API catalog.
 
+### Configuring Image Placeholders
+
+You can configure the image placeholder algorithm used for catalog generation in the `.env` file via `PLACEHOLDER_ALGORITHM` (supporting `blurhash`, `thumbhash`, `lqip`, `average_color`, or `none`). See [docs/custom-paths.md](file:///Users/dev/Developer/@PortfolioProjects/media-lab/docs/custom-paths.md#configurable-image-placeholders) for a comprehensive guide.
+
 Generated assets are written under `media/generated/<asset-id>/` and are ignored by Git. The source inbox is ignored as well, so large local media files cannot be committed accidentally.
+
 
 ---
 

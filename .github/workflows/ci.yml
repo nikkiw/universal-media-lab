@@ -24,6 +24,9 @@ jobs:
       - name: Validate Python scripts
         run: python3 -m py_compile scripts/build-catalog.py
 
+      - name: Test catalog generation
+        run: make test-catalog
+
       - name: ShellCheck linting
         uses: ludeeus/action-shellcheck@master
         with:

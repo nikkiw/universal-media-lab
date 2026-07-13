@@ -78,6 +78,29 @@ graph TD
 - **Toxiproxy**: repeatable transport profiles without changing client code.
 - **Prometheus + Grafana**: optional server-side metrics through a Compose profile.
 
+## Prerequisites
+
+Before starting, ensure you have **Docker Compose** and **GNU Make** installed.
+
+### Installing Make
+
+* **macOS**: Installed via Xcode Command Line Tools:
+  ```bash
+  xcode-select --install
+  ```
+* **Linux (Ubuntu/Debian)**:
+  ```bash
+  sudo apt update && sudo apt install build-essential
+  ```
+* **Windows**:
+  Since this project's `Makefile` and helper scripts rely on Unix utilities (like `id` and `/bin/sh`), we recommend running it within **WSL2 (Windows Subsystem for Linux)**:
+  ```bash
+  sudo apt update && sudo apt install build-essential
+  ```
+  Alternatively, you can run it via **Git Bash** after installing `make` for Windows (e.g., via `winget install GnuWin32.Make` or `choco install make`).
+
+---
+
 ## Start
 
 ```bash
@@ -232,6 +255,7 @@ The ingest tool runs only on demand through the Compose `tools` profile. Runtime
 
 For each source video, the pipeline creates:
 
+- an exact centered 9:16 portrait crop for every generated video and preview;
 - H.264/AAC progressive MP4 with `faststart` metadata placement;
 - adaptive HLS VOD with an fMP4 master playlist;
 - adaptive MPEG-DASH VOD with separate video and audio adaptation sets;
@@ -339,6 +363,7 @@ make verify-media
 | `make rebuild [ID=<id>]` | Force-regenerates transcoding files and JSON catalog for the specified ID (or all if omitted). |
 | `make catalog` | Rebuilds the static feed `/api/v1/feed` and subtitles metadata without re-encoding video tracks. |
 | `make verify-media` | Validates generated assets, manifest formats, poster resizing, and API status codes locally. |
+| `make test-catalog` | Runs catalog URL-prefix and generated-metadata unit tests. |
 | `make bootstrap` | Sequentially runs `ingest`, starts the Compose environment (`up`), executes integration checks, and runs `verify-media`. |
 
 ---
@@ -355,6 +380,8 @@ All playbacks, posters, and subtitles are served via root-relative paths. Androi
 - **USB Device (with `adb reverse tcp:18080 tcp:18080`)**: `http://127.0.0.1:18080`
 - **iOS Simulator / Desktop**: `http://127.0.0.1:18080`
 
+Direct playback, rendition, subtitle, and storyboard URLs use `/media/generated` by default. To expose them under a project-specific route, set `MEDIA_URL_PREFIX` in `.env`, add a matching optional route under `gateway/project-routes/`, and run `make catalog`. See [Customizing Paths](docs/custom-paths.md) for complete default, `/videos`, and nested-prefix examples. `/api`, `/img`, and diagnostic `testUrls` keep their built-in routes.
+
 ### Test & Fault URLs
 Every feed item exposes custom mocked test endpoints under `testUrls`:
 - `cacheableProgressive`: `/cache/media/generated/<id>/progressive/video.mp4`
@@ -367,5 +394,4 @@ Every feed item exposes custom mocked test endpoints under `testUrls`:
 ---
 
 ## Out of Scope / Futures
-This pipeline is designed for H.264/AAC offline streaming compatibility. Live streaming (HLS/DASH), DRM license server simulators, HEVC/VP9 ladders, and production backend authorization systems are out of scope. For complex custom responses, you can configure [wiremock/mappings/](file:///Users/dev/Developer/@PortfolioProjects/media-lab/wiremock/mappings).
-
+This pipeline is designed for H.264/AAC offline streaming compatibility. Live streaming (HLS/DASH), DRM license server simulators, HEVC/VP9 ladders, and production backend authorization systems are out of scope. For complex custom responses, configure [wiremock/mappings/](wiremock/mappings/).

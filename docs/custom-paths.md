@@ -1,76 +1,167 @@
-# Customizing Paths Guide
+# Customizing Paths
 
-This guide explains how to customize the directory paths, volume mounts, URL routing paths, and configuration locations within the **Universal Media Lab** to match your project's specific backend structure.
+Media Lab has three different kinds of paths. They are configured independently:
 
----
+- host paths, such as the directory containing source videos;
+- container paths, such as `/media/generated` inside the tool containers;
+- public URL paths written to the generated catalog and requested by clients.
 
-## 1. Customizing Media Directories (Inbox, Generated, Catalog)
+Changing a public URL does not move generated files. It only changes catalog URLs and requires a matching gateway route.
 
-By default, the media ingest tool uses directories relative to the repository root:
-* **Inbox**: `/media/inbox` (where you place raw source videos)
-* **Generated Outputs**: `/media/generated` (where MP4, HLS, and DASH files are compiled)
-* **Catalog API**: `/media/catalog` (where static JSON endpoints are compiled)
+## Public media URL prefix
 
-### Using Environment Variables
-You can override the directories processed by the ingest scripts without modifying the container structure. Add or update these variables in your local `.env` file:
+By default, generated catalog entries use `/media/generated`:
+
+```json
+{
+  "hlsUrl": "/media/generated/demo/hls/master.m3u8",
+  "dashUrl": "/media/generated/demo/dash/manifest.mpd"
+}
+```
+
+The default works without any project-specific Nginx configuration.
+
+To expose generated media under `/videos`, add this value to the local `.env` file:
+
+```dotenv
+MEDIA_URL_PREFIX=/videos
+```
+
+Then create `gateway/project-routes/project.conf`:
+
+```nginx
+location /videos/ {
+  # The trailing slashes replace /videos/ with /media/generated/ upstream.
+  proxy_pass http://origin_upstream/media/generated/;
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_buffering off;
+  proxy_force_ranges on;
+}
+```
+
+Rebuild the catalog and reload the gateway:
 
 ```bash
-# Ingest script overrides
-MEDIA_INPUT_ROOT=/media/my-custom-inbox
-MEDIA_OUTPUT_ROOT=/media/my-custom-output
-MEDIA_STORYBOARD_INTERVAL=10
-
-# Catalog builder overrides
-MEDIA_ROOT=/media
+make catalog
+docker compose exec gateway nginx -t
+docker compose exec gateway nginx -s reload
+make verify-media
 ```
 
-### Overriding Host Volumes in Docker Compose
-If you want to read source videos from or write transcoded files to directories outside of the project root (e.g. a shared external hard drive or another local project directory), modify the volume mapping inside [compose.yaml](file:///Users/dev/Developer/@PortfolioProjects/media-lab/compose.yaml):
+The generated `media/catalog/v1/feed.json` and per-asset catalog files will now contain URLs such as:
+
+```text
+/videos/demo/progressive/video.mp4
+/videos/demo/hls/master.m3u8
+/videos/demo/dash/manifest.mpd
+/videos/demo/storyboard/storyboard.vtt
+```
+
+Nested prefixes work the same way. For example:
+
+```dotenv
+MEDIA_URL_PREFIX=/mobile/v2/videos
+```
+
+```nginx
+location /mobile/v2/videos/ {
+  proxy_pass http://origin_upstream/media/generated/;
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_buffering off;
+  proxy_force_ranges on;
+}
+```
+
+`MEDIA_URL_PREFIX` must be a root-relative path beginning with one `/`. Trailing and repeated slashes are normalized. Absolute URLs, query strings, fragments, whitespace, backslashes, `.` and `..` path segments are rejected.
+
+The variable changes direct media URLs in these catalog fields:
+
+- `progressiveUrl`, `hlsUrl`, and `dashUrl`;
+- every `playback[].url`;
+- every `renditions[].hlsUrl`;
+- every `subtitles[].url`;
+- `storyboard.url`.
+
+It does not change `/api`, `/img`, `/cache`, `/no-range`, `/wrong-content-type`, or `/mock` routes. Those are built-in Media Lab API, image-transformation, and diagnostic endpoints.
+
+To return to the default setup, remove `MEDIA_URL_PREFIX` from `.env`, remove project-specific `.conf` files, rebuild the catalog, and reload the gateway. The tracked `gateway/project-routes/` directory may remain empty.
+
+## Project-specific gateway routes
+
+Files matching `gateway/project-routes/*.conf` are loaded inside the gateway `server` block. They are optional: a fresh checkout contains an empty tracked directory and starts with only the built-in routes from [`gateway/nginx.conf`](../gateway/nginx.conf).
+
+Route files should contain `location` blocks, not complete `http` or `server` blocks. Always validate changes before reloading:
+
+```bash
+docker compose exec gateway nginx -t
+docker compose exec gateway nginx -s reload
+```
+
+Do not redefine an existing location such as `/media/`; Nginx rejects duplicate locations.
+
+## Host media directories
+
+The default bind mount is `./media:/media`. Consequently:
+
+- `media/inbox` is available as `/media/inbox`;
+- `media/generated` is available as `/media/generated`;
+- `media/catalog` is available as `/media/catalog`.
+
+To keep generated data in another host directory, add a Compose override instead of editing the base [`compose.yaml`](../compose.yaml). For example, `compose.local.yaml`:
 
 ```yaml
-  media-ingest:
-    # ...
+services:
+  origin:
     volumes:
-      - ./scripts/media-ingest.sh:/scripts/media-ingest.sh:ro
-      - ./config/encoding-ladder.tsv:/config/encoding-ladder.tsv:ro
-      - /absolute/path/to/my/external/videos:/media/inbox      # Custom host path
-      - /absolute/path/to/my/client/project/assets:/media/generated # Custom output path
-      - ./media:/media
+      - /absolute/path/to/shared-media:/srv/media:ro
+
+  imgproxy:
+    volumes:
+      - /absolute/path/to/shared-media/images:/srv/images
+      - /absolute/path/to/shared-media/generated:/srv/images/generated:ro
+
+  media-ingest:
+    volumes:
+      - /absolute/path/to/shared-media:/media
+
+  media-catalog:
+    volumes:
+      - /absolute/path/to/shared-media:/media
 ```
 
-> [!WARNING]
-> Keep the container mount paths (the right side of the `:` colon) as `/media/inbox` and `/media/generated` unless you also update the corresponding environment variables (`MEDIA_INPUT_ROOT`/`MEDIA_OUTPUT_ROOT`) to match the new container directories.
+Use the override for every service shown above so ingest, catalog generation, origin, and imgproxy all see the same files:
 
----
+```bash
+docker compose -f compose.yaml -f compose.local.yaml --profile tools run --rm media-ingest
+docker compose -f compose.yaml -f compose.local.yaml --profile tools run --rm media-catalog
+docker compose -f compose.yaml -f compose.local.yaml up -d
+```
 
-## 2. Customizing the Encoding Ladder File Path
+Keep the container-side `/media` layout unless the corresponding service environment and all dependent mounts are changed together.
 
-By default, the encoding profiles (resolutions, bitrates, buffer sizing) are read from [config/encoding-ladder.tsv](file:///Users/dev/Developer/@PortfolioProjects/media-lab/config/encoding-ladder.tsv).
+## Custom encoding ladder
 
-To use a custom encoding ladder:
-1. Create your custom TSV file (e.g., `config/my-ladder.tsv`).
-2. Add the variable to `.env`:
-   ```bash
-   MEDIA_LADDER_FILE=/config/my-ladder.tsv
-   ```
-3. Mount your file into the `media-ingest` service inside [compose.yaml](file:///Users/dev/Developer/@PortfolioProjects/media-lab/compose.yaml):
-   ```yaml
-   volumes:
-     - ./config/my-ladder.tsv:/config/my-ladder.tsv:ro
-   ```
+The ingest container reads `/config/encoding-ladder.tsv`. To use another file, override both its environment value and mount:
 
----
+```yaml
+services:
+  media-ingest:
+    environment:
+      MEDIA_LADDER_FILE: /config/project-ladder.tsv
+    volumes:
+      - ./config/project-ladder.tsv:/config/project-ladder.tsv:ro
+```
 
-## 3. Customizing WireMock Mock Mappings
+Run `make rebuild` after changing the ladder so existing generated assets are re-encoded.
 
-If you need to mock custom production API paths (e.g. `/api/v2/users/profile` or `/cdn/video/manifest`), you can define project-specific paths using WireMock mappings.
+## Custom WireMock mappings
 
-Place files into the following paths:
-* **JSON Request/Response Definitions**: [wiremock/mappings/](file:///Users/dev/Developer/@PortfolioProjects/media-lab/wiremock/mappings)
-* **Response Body Fixtures**: `wiremock/__files/`
+Project-specific mocked APIs can be added under [`wiremock/mappings/`](../wiremock/mappings), with response bodies under `wiremock/__files/`.
 
-### Example: Mocking a custom video JSON endpoint
-Create [wiremock/mappings/custom-video.json](file:///Users/dev/Developer/@PortfolioProjects/media-lab/wiremock/mappings/custom-video.json):
+Example mapping:
+
 ```json
 {
   "request": {
@@ -87,41 +178,8 @@ Create [wiremock/mappings/custom-video.json](file:///Users/dev/Developer/@Portfo
 }
 ```
 
-Then place your JSON response body file into `wiremock/__files/custom-video-details.json`. Restart the WireMock container to load changes:
+Restart WireMock after adding or changing mappings:
+
 ```bash
 docker compose restart wiremock
-```
-
----
-
-## 4. Customizing Nginx URL Gateway Routing
-
-The main gateway routes incoming HTTP requests to downstream services based on URL prefixes. You can customize these routing locations inside [gateway/nginx.conf](file:///Users/dev/Developer/@PortfolioProjects/media-lab/gateway/nginx.conf).
-
-### Example: Routing a custom `/static/` prefix to the origin server
-If your client application expects assets under a `/static/` path rather than `/media/`, open [gateway/nginx.conf](file:///Users/dev/Developer/@PortfolioProjects/media-lab/gateway/nginx.conf) and map the new location block:
-
-```nginx
-# Map /static/ to the media origin server
-location /static/ {
-  proxy_pass http://origin_upstream;
-  proxy_http_version 1.1;
-  proxy_set_header Connection "";
-  proxy_buffering off;
-}
-```
-
-Then edit [origin/nginx.conf](file:///Users/dev/Developer/@PortfolioProjects/media-lab/origin/nginx.conf) to handle the static prefix, or map an alias:
-
-```nginx
-location /static/ {
-  alias /srv/media/; # Maps http://gateway/static/video.mp4 to /srv/media/video.mp4
-  autoindex on;
-}
-```
-
-Remember to reload Nginx configuration after any routing changes:
-```bash
-docker compose exec gateway nginx -s reload
-docker compose exec origin nginx -s reload
 ```

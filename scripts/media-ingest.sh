@@ -129,13 +129,22 @@ process_file() {
       ;;
   esac
 
-  if [ "$source_width" -le "$source_height" ]; then
-    source_short=$source_width
-    orientation=portrait
-  else
-    source_short=$source_height
-    orientation=landscape
-  fi
+  # Use the largest centered, even-sized crop with an exact 9:16 ratio.
+  crop_dims=$(awk -v w="$source_width" -v h="$source_height" '
+    BEGIN {
+      unit = int(w / 9);
+      height_unit = int(h / 16);
+      if (height_unit < unit) unit = height_unit;
+      unit = int(unit / 2) * 2;
+      if (unit < 2) exit 1;
+      print unit * 9 "x" unit * 16;
+    }
+  ') || fail "video is too small for an even 9:16 crop: $file_name"
+  crop_width=${crop_dims%x*}
+  crop_height=${crop_dims#*x}
+
+  source_short=$crop_width
+  crop_filter="crop=$crop_width:$crop_height,"
 
   if ffprobe -v error -select_streams a:0 -show_entries stream=index \
       -of csv=p=0 "$input" | grep -q .; then
@@ -165,7 +174,7 @@ process_file() {
     set -- "$@" -map 0:a:0
   fi
   set -- "$@" \
-    -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p" \
+    -vf "${crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p" \
     -c:v libx264 -preset "$PRESET" -profile:v main \
     -r "$FRAME_RATE" -g "$gop" -keyint_min "$gop" -sc_threshold 0 \
     -metadata:s:v:0 rotate=0
@@ -174,6 +183,8 @@ process_file() {
   fi
   set -- "$@" -movflags +faststart "$work_dir/progressive/video.mp4"
   "$@"
+  ffprobe -v error -show_format -show_streams -of json \
+    "$work_dir/progressive/video.mp4" > "$work_dir/output-probe.json"
 
   audio_path=
   if [ "$has_audio" -eq 1 ]; then
@@ -201,19 +212,16 @@ process_file() {
 
     target_short=$configured_short
     if [ "$target_short" -gt "$source_short" ]; then
+      if [ -s "$dimensions_seen" ]; then
+        continue
+      fi
       target_short=$source_short
     fi
     output_name="${target_short}p"
 
-    if [ "$orientation" = portrait ]; then
-      target_width=$target_short
-      target_height=$(awk -v h="$source_height" -v w="$source_width" -v s="$target_short" \
-        'BEGIN { value=int((h*s/w+1)/2)*2; if (value < 2) value=2; print value }')
-    else
-      target_height=$target_short
-      target_width=$(awk -v h="$source_height" -v w="$source_width" -v s="$target_short" \
-        'BEGIN { value=int((w*s/h+1)/2)*2; if (value < 2) value=2; print value }')
-    fi
+    target_width=$target_short
+    target_height=$(awk -v s="$target_short" \
+      'BEGIN { value=int(s*16/9/2)*2; if (value < 2) value=2; print value }')
 
     dimensions="${target_width}x${target_height}"
     if grep -Fx "$dimensions" "$dimensions_seen" >/dev/null 2>&1; then
@@ -224,8 +232,9 @@ process_file() {
     output="$work_dir/encoded/video-$output_name.mp4"
     ffmpeg -hide_banner -loglevel warning -nostdin -y -i "$input" \
       -map 0:v:0 -an \
-      -vf "scale=${target_width}:${target_height}:flags=lanczos,format=yuv420p" \
+      -vf "${crop_filter}scale=${target_width}:${target_height}:flags=lanczos,setsar=1,format=yuv420p" \
       -c:v libx264 -preset "$PRESET" -profile:v main \
+      -x264opts "sar=1/1" \
       -r "$FRAME_RATE" -g "$gop" -keyint_min "$gop" -sc_threshold 0 \
       -force_key_frames "expr:gte(t,n_forced*${SEGMENT_SECONDS})" \
       -b:v "$bitrate" -maxrate "$maxrate" -bufsize "$bufsize" \
@@ -316,17 +325,17 @@ process_file() {
   log "Extracting poster and timeline previews"
   ffmpeg -hide_banner -loglevel warning -nostdin -y \
     -ss "$POSTER_SECOND" -i "$input" -map 0:v:0 -frames:v 1 \
-    -vf "scale='min(1280,iw)':-2:flags=lanczos" \
+    -vf "${crop_filter}scale='min(1280,iw)':-2:flags=lanczos" \
     -q:v 2 -update 1 "$work_dir/poster.jpg" || true
   if [ ! -s "$work_dir/poster.jpg" ]; then
     ffmpeg -hide_banner -loglevel warning -nostdin -y \
       -i "$input" -map 0:v:0 -frames:v 1 \
-      -vf "scale='min(1280,iw)':-2:flags=lanczos" \
+      -vf "${crop_filter}scale='min(1280,iw)':-2:flags=lanczos" \
       -q:v 2 -update 1 "$work_dir/poster.jpg"
   fi
 
   ffmpeg -hide_banner -loglevel warning -nostdin -y -i "$input" \
-    -map 0:v:0 -vf "fps=1/${STORYBOARD_INTERVAL},scale=320:-2:flags=lanczos" \
+    -map 0:v:0 -vf "${crop_filter}fps=1/${STORYBOARD_INTERVAL},scale=320:-2:flags=lanczos" \
     -q:v 4 "$work_dir/storyboard/frame-%05d.jpg"
 
   input_dir=${input%/*}

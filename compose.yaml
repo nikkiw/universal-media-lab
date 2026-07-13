@@ -64,6 +64,7 @@ services:
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./gateway/html:/usr/share/nginx/html:ro
+      - ./gateway/project-routes:/etc/nginx/project-routes:ro
     depends_on:
       - origin
       - imgproxy
@@ -137,6 +138,7 @@ services:
     environment:
       MEDIA_ROOT: /media
       MEDIA_STORYBOARD_INTERVAL: "${MEDIA_STORYBOARD_INTERVAL:-5}"
+      MEDIA_URL_PREFIX: "${MEDIA_URL_PREFIX:-/media/generated}"
     volumes:
       - ./scripts/build-catalog.py:/scripts/build-catalog.py:ro
       - ./media:/media

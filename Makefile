@@ -4,6 +4,7 @@ HOST_IDS = HOST_UID=$$(id -u) HOST_GID=$$(id -g)
 
 .PHONY: up up-observability down reset logs ps urls smoke \
 	interactive ingest ingest-one rebuild catalog verify-media bootstrap \
+	test-catalog \
 	network-clean network-lte network-3g network-flaky
 
 up:
@@ -51,6 +52,9 @@ catalog:
 
 verify-media:
 	./scripts/verify-media.sh
+
+test-catalog:
+	python3 -m unittest discover -s tests -p 'test_*.py'
 
 bootstrap:
 	$(MAKE) ingest

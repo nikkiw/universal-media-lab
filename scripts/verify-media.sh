@@ -14,37 +14,32 @@ fail() {
   exit 1
 }
 
-[ -f "$CATALOG" ] || fail "catalog is missing; run make ingest"
+verify_asset() {
+  asset_dir=$1
+  asset_id=${asset_dir##*/}
 
-asset_dir=$(find "$GENERATED" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)
-[ -n "$asset_dir" ] || fail "no generated assets; put a video in media/inbox and run make ingest"
-id=${asset_dir##*/}
+  for file in \
+    "$asset_dir/poster.jpg" \
+    "$asset_dir/progressive/video.mp4" \
+    "$asset_dir/hls/master.m3u8" \
+    "$asset_dir/dash/manifest.mpd" \
+    "$asset_dir/storyboard/storyboard.vtt"; do
+    [ -s "$file" ] || fail "missing or empty file: $file"
+  done
 
-for file in \
-  "$asset_dir/poster.jpg" \
-  "$asset_dir/progressive/video.mp4" \
-  "$asset_dir/hls/master.m3u8" \
-  "$asset_dir/dash/manifest.mpd" \
-  "$asset_dir/storyboard/storyboard.vtt"; do
-  [ -s "$file" ] || fail "missing or empty file: $file"
-done
+  hls_variants=$(grep -c '^#EXT-X-STREAM-INF:' "$asset_dir/hls/master.m3u8" || true)
+  dash_variants=$(grep -o '<Representation' "$asset_dir/dash/manifest.mpd" | wc -l | tr -d ' ')
+  [ "$hls_variants" -ge 1 ] || fail "$asset_id: HLS master has no variants"
+  [ "$dash_variants" -ge 1 ] || fail "$asset_id: DASH manifest has no representations"
 
-hls_variants=$(grep -c '^#EXT-X-STREAM-INF:' "$asset_dir/hls/master.m3u8" || true)
-dash_variants=$(grep -o '<Representation' "$asset_dir/dash/manifest.mpd" | wc -l | tr -d ' ')
-[ "$hls_variants" -ge 1 ] || fail "HLS master has no variants"
-[ "$dash_variants" -ge 1 ] || fail "DASH manifest has no representations"
+  if [ "$hls_variants" -lt 2 ]; then
+    echo "Warning: $asset_id source is too small for ABR; only one HLS rendition was generated"
+  fi
 
-if [ "$hls_variants" -lt 2 ]; then
-  echo "Warning: source is too small for ABR; only one HLS rendition was generated"
-fi
-
-printf 'API catalog\n'
-curl -fsS -o /dev/null "$BASE/api/v1/feed"
-
-catalog_urls=$(
-  HOST_UID=$(id -u) HOST_GID=$(id -g) \
-    docker compose --profile tools run --rm --entrypoint python media-catalog \
-    -c '
+  catalog_urls=$(
+    HOST_UID=$(id -u) HOST_GID=$(id -g) \
+      docker compose --profile tools run --rm --entrypoint python media-catalog \
+      -c '
 import json
 import os
 import runpy
@@ -84,33 +79,51 @@ print(item["hlsUrl"])
 print(item["dashUrl"])
 print(item["progressiveUrl"])
 print(storyboard["url"])
-' "$id"
-)
-feed_hls=$(printf '%s\n' "$catalog_urls" | sed -n '1p')
-feed_dash=$(printf '%s\n' "$catalog_urls" | sed -n '2p')
-feed_progressive=$(printf '%s\n' "$catalog_urls" | sed -n '3p')
-feed_storyboard=$(printf '%s\n' "$catalog_urls" | sed -n '4p')
+' "$asset_id"
+  )
 
-printf 'Poster through imgproxy\n'
-curl -fsS -o /dev/null "$BASE/img/insecure/rs:fill:320:180/q:60/plain/local:///generated/$id/poster.jpg@webp"
-printf 'HLS manifest\n'
-curl -fsS -o /dev/null "$BASE$feed_hls"
-printf 'DASH manifest\n'
-curl -fsS -o /dev/null "$BASE$feed_dash"
-printf 'Storyboard track\n'
-curl -fsS -o /dev/null "$BASE$feed_storyboard"
-printf 'Progressive Range request\n'
-status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Range: bytes=0-1023' \
-  "$BASE$feed_progressive")
-[ "$status" = "206" ] || fail "expected HTTP 206 for Range request, received $status"
+  feed_hls=$(printf '%s\n' "$catalog_urls" | sed -n '1p')
+  feed_dash=$(printf '%s\n' "$catalog_urls" | sed -n '2p')
+  feed_progressive=$(printf '%s\n' "$catalog_urls" | sed -n '3p')
+  feed_storyboard=$(printf '%s\n' "$catalog_urls" | sed -n '4p')
 
-printf 'Local ffprobe validation\n'
-HOST_UID=$(id -u) HOST_GID=$(id -g) \
-  docker compose --profile tools run --rm --entrypoint ffprobe media-ingest \
-  -v error -show_entries format=format_name -of default=noprint_wrappers=1:nokey=1 \
-  "/media/generated/$id/hls/master.m3u8" >/dev/null
-HOST_UID=$(id -u) HOST_GID=$(id -g) \
-  docker compose --profile tools run --rm --entrypoint python media-catalog \
-  -c "import xml.etree.ElementTree as ET; ET.parse('/media/generated/$id/dash/manifest.mpd')" >/dev/null
+  printf '%s: poster through imgproxy\n' "$asset_id"
+  curl -fsS -o /dev/null "$BASE/img/insecure/rs:fill:320:180/q:60/plain/local:///generated/$asset_id/poster.jpg@webp"
+  printf '%s: HLS manifest\n' "$asset_id"
+  curl -fsS -o /dev/null "$BASE$feed_hls"
+  printf '%s: DASH manifest\n' "$asset_id"
+  curl -fsS -o /dev/null "$BASE$feed_dash"
+  printf '%s: storyboard track\n' "$asset_id"
+  curl -fsS -o /dev/null "$BASE$feed_storyboard"
+  printf '%s: progressive Range request\n' "$asset_id"
+  status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Range: bytes=0-1023' \
+    "$BASE$feed_progressive")
+  [ "$status" = "206" ] || fail "$asset_id: expected HTTP 206 for Range request, received $status"
 
-echo "Media verification OK: $id ($hls_variants HLS variants, $dash_variants DASH representations)"
+  printf '%s: local ffprobe validation\n' "$asset_id"
+  HOST_UID=$(id -u) HOST_GID=$(id -g) \
+    docker compose --profile tools run --rm --entrypoint ffprobe media-ingest \
+    -v error -show_entries format=format_name -of default=noprint_wrappers=1:nokey=1 \
+    "/media/generated/$asset_id/hls/master.m3u8" >/dev/null
+  HOST_UID=$(id -u) HOST_GID=$(id -g) \
+    docker compose --profile tools run --rm --entrypoint python media-catalog \
+    -c "import xml.etree.ElementTree as ET; ET.parse('/media/generated/$asset_id/dash/manifest.mpd')" >/dev/null
+
+  echo "Media verification OK: $asset_id ($hls_variants HLS variants, $dash_variants DASH representations)"
+}
+
+[ -f "$CATALOG" ] || fail "catalog is missing; run make ingest"
+[ -d "$GENERATED" ] || fail "generated media directory is missing; run make ingest"
+
+printf 'API catalog\n'
+curl -fsS -o /dev/null "$BASE/api/v1/feed"
+
+verified=0
+for asset_dir in "$GENERATED"/*; do
+  [ -d "$asset_dir" ] || continue
+  verify_asset "$asset_dir"
+  verified=$((verified + 1))
+done
+
+[ "$verified" -gt 0 ] || fail "no generated assets; put a video in media/inbox and run make ingest"
+echo "Verified $verified generated media asset(s)"

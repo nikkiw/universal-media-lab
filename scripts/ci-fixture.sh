@@ -17,7 +17,7 @@ docker compose --profile tools run --rm --entrypoint ffmpeg media-ingest \
   -hide_banner -loglevel error -y \
   -f lavfi -i 'testsrc2=size=540x960:rate=30' \
   -f lavfi -i 'sine=frequency=1000:sample_rate=48000' \
-  -t 2 -shortest \
+  -t 12 -shortest \
   -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
   -c:a aac -b:a 96k \
   /media/inbox/ci-fixture.mp4

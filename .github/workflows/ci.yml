@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -19,7 +22,7 @@ jobs:
         run: docker compose config -q
 
       - name: Validate shell syntax
-        run: sh -n scripts/*.sh
+        run: sh -n scripts/*.sh toxiproxy/bootstrap.sh
 
       - name: Validate Python scripts
         run: python3 -m py_compile scripts/build-catalog.py
@@ -31,3 +34,38 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: './scripts'
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env template
+        run: cp .env.example .env
+
+      - name: Generate deterministic media fixture
+        run: make ci-fixture
+
+      - name: Ingest media and build catalog
+        run: make ingest
+
+      - name: Start runtime stack
+        run: docker compose up -d
+
+      - name: Verify runtime profiles and faults
+        run: make test-runtime
+
+      - name: Verify every generated media asset
+        run: make verify-media
+
+      - name: Dump runtime diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color
+
+      - name: Stop runtime stack
+        if: always()
+        run: docker compose down -v --remove-orphans

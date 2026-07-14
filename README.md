@@ -39,7 +39,7 @@ graph TD
         subgraph NetworkProxy ["Toxiproxy (Network Profiles)"]
             Proxy18081["Port 18081: Clean Proxy"]:::proxy
             Proxy18083["Port 18083: LTE (80ms RTT, 10Mbps)"]:::proxy
-            Proxy18087["Port 18087: Flaky (400ms RTT, 5% loss)"]:::proxy
+            Proxy18087["Port 18087: Flaky (400ms RTT, 5% connection resets)"]:::proxy
             ProxyDynamic["Port 18080: Dynamic Profile"]:::proxy
         end
 
@@ -59,7 +59,7 @@ graph TD
 
     Proxy18081 -->|Route traffic| Gateway
     Proxy18083 -->|Inject latency + speed limit| Gateway
-    Proxy18087 -->|Inject latency + packet loss| Gateway
+    Proxy18087 -->|Inject latency + intermittent resets| Gateway
     ProxyDynamic -->|Inject dynamic toxics| Gateway
 
     Gateway -->|"/media/*"| Origin
@@ -133,8 +133,10 @@ Open:
 | 18084 | slow LTE, ~150 ms RTT, ~2 Mbps |
 | 18085 | 3G, ~300 ms RTT, ~750 Kbps |
 | 18086 | EDGE, ~500 ms RTT, ~200 Kbps |
-| 18087 | flaky, ~400 ms RTT, ~1 Mbps, 5% chunk loss |
+| 18087 | flaky, ~400 ms RTT, ~1 Mbps, 5% connection-reset probability |
 | 18088 | offline / connection refused |
+
+> **Flaky semantics:** the project pins Toxiproxy v2.12.0, which does not provide a `packet_loss` toxic. The `flaky` preset therefore models intermittent failure with a 5% probability of a downstream TCP reset, plus latency, jitter, and bandwidth limits. It is intentionally described as connection resets rather than packet loss.
 
 The profiles are deterministic approximations. Toxiproxy operates at TCP level; use another stand for HTTP/3/QUIC packet-level testing.
 
@@ -341,7 +343,7 @@ Test adaptive bitrate switching (ABR) by dynamically changing the Toxiproxy netw
 ```bash
 make network-lte    # Limit to LTE speed & latency
 make network-3g     # Limit to 3G speed & latency
-make network-flaky  # Introduce latency and 5% packet loss
+make network-flaky  # Add latency and a 5% connection-reset probability
 make network-clean  # Reset all limits (perfect connection)
 ```
 
@@ -367,7 +369,8 @@ make verify-media
 | `make ingest-one ID=<id>` | Processes only the single video matching the specified ID or filename. |
 | `make rebuild [ID=<id>]` | Force-regenerates transcoding files and JSON catalog for the specified ID (or all if omitted). |
 | `make catalog` | Rebuilds the static feed `/api/v1/feed` and subtitles metadata without re-encoding video tracks. |
-| `make verify-media` | Validates generated assets, manifest formats, poster resizing, and API status codes locally. |
+| `make verify-media` | Validates every generated asset, catalog URLs, Range support, poster resizing, and local HLS/DASH parsing. |
+| `make test-runtime` | Runs live Docker end-to-end checks for network profiles, server profiles, HTTP faults, measured TTFB, offline, timeout, reset, and smoke behavior. |
 | `make test-catalog` | Runs catalog URL-prefix and generated-metadata unit tests. |
 | `make bootstrap` | Sequentially runs `ingest`, starts the Compose environment (`up`), executes integration checks, and runs `verify-media`. |
 
